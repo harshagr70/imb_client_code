@@ -15,6 +15,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 import sys
 import importlib.util
+import fitz
 
 # Import pipeline components
 from helpers import llm_validator_new
@@ -57,30 +58,6 @@ st.markdown("""
         border-radius: 0.5rem;
         margin: 1rem 0;
     }
-    .hero-card {
-        background: linear-gradient(120deg, #1f77b4 0%, #5ad1f9 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 1rem;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-    }
-    .metric-card {
-        background-color: #ffffff;
-        border-radius: 0.75rem;
-        padding: 1rem;
-        border: 1px solid #eef2f7;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-    }
-    .metric-value {
-        font-size: 1.6rem;
-        font-weight: bold;
-        color: #1f77b4;
-    }
-    .metric-label {
-        font-size: 0.95rem;
-        color: #5f6b7c;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -95,6 +72,12 @@ if 'latest_logs' not in st.session_state:
     st.session_state.latest_logs = []
 if 'latest_progress' not in st.session_state:
     st.session_state.latest_progress = 0
+if 'page_sources' not in st.session_state:
+    st.session_state.page_sources = {}
+if 'uploaded_pdf_bytes' not in st.session_state:
+    st.session_state.uploaded_pdf_bytes = None
+if 'page_previews' not in st.session_state:
+    st.session_state.page_previews = {}
 
 def normalize_year_key(key: Any) -> Optional[str]:
     """Normalize a year/date string into a 4-digit year."""
@@ -155,66 +138,42 @@ def build_period_columns(periods: List[Dict[str, Any]], rows: List[Dict[str, Any
 
     return ordered_years
 
-def extract_metric_value(statement: Dict[str, Any], keywords: List[str]) -> Optional[float]:
-    """Find the first matching numeric value for provided keywords."""
-    if not statement:
-        return None
-    rows = statement.get("rows") or []
-    period_keys = build_period_columns(statement.get("periods"), rows)
-    if not period_keys:
+def get_page_preview_image(page_number: Optional[int]) -> Optional[bytes]:
+    """Render and cache a PDF page preview."""
+    if page_number is None or st.session_state.uploaded_pdf_bytes is None:
         return None
 
-    latest_period = period_keys[-1]
-    for row in rows:
-        label = (row.get("label") or "").lower()
-        if any(keyword in label for keyword in keywords):
-            value = row.get("values", {}).get(latest_period)
-            if isinstance(value, (int, float)):
-                return float(value)
-    return None
+    cache_key = f"page_{page_number}"
+    if cache_key in st.session_state.page_previews:
+        return st.session_state.page_previews[cache_key]
 
-def format_currency(value: Optional[float]) -> str:
-    if value is None:
-        return "—"
-    abs_val = abs(value)
-    if abs_val >= 1_000_000_000:
-        return f"{value/1_000_000_000:.1f}B"
-    if abs_val >= 1_000_000:
-        return f"{value/1_000_000:.1f}M"
-    if abs_val >= 1_000:
-        return f"{value/1_000:.1f}K"
-    return f"{value:,.0f}"
+    try:
+        with fitz.open(stream=st.session_state.uploaded_pdf_bytes, filetype="pdf") as doc:
+            if page_number < 0 or page_number >= doc.page_count:
+                return None
+            page = doc.load_page(page_number)
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            image_bytes = pix.tobytes("png")
+            st.session_state.page_previews[cache_key] = image_bytes
+            return image_bytes
+    except Exception:
+        return None
 
-def render_statement_chart(statement: Dict[str, Any], title: str):
-    rows = statement.get("rows") or []
-    period_keys = build_period_columns(statement.get("periods"), rows)
-    if len(period_keys) < 2:
+def render_source_preview(statement_key: str, label: str):
+    page_info = st.session_state.page_sources.get(statement_key)
+    if not page_info:
         return
 
-    revenue_row = None
-    for row in rows:
-        label = (row.get("label") or "").lower()
-        if any(term in label for term in ["revenue", "sales", "net sales"]):
-            revenue_row = row
-            break
+    page_number = page_info.get("page_number")
+    page_label = page_info.get("page_label")
+    display_page = page_label or (page_number + 1 if isinstance(page_number, int) else "?")
 
-    if not revenue_row:
-        return
-
-    values = []
-    for period in period_keys:
-        val = revenue_row.get("values", {}).get(period)
-        values.append(val if isinstance(val, (int, float)) else None)
-
-    if all(v is None for v in values):
-        return
-
-    chart_df = pd.DataFrame({"period": period_keys, "value": values})
-    chart_df = chart_df.dropna()
-    if len(chart_df) < 2:
-        return
-
-    st.line_chart(chart_df.set_index("period"), height=220, use_container_width=True)
+    with st.expander(f"View source (Page {display_page})", expanded=False):
+        image_bytes = get_page_preview_image(page_number)
+        if image_bytes:
+            st.image(image_bytes, use_container_width=True, caption=f"{label} source page {display_page}")
+        else:
+            st.info(f"Source reference page: {display_page}. Preview unavailable.")
 
 def process_pdf_pipeline(
     pdf_path: str,
@@ -244,6 +203,7 @@ def process_pdf_pipeline(
         progress_callback(0, total_steps)
 
     try:
+        configure_attention_llm(openai_api_key)
         # Step 1: Parse PDF using parser API
         log("Parsing PDF with parser API...", "running")
         with st.spinner("📄 Parsing PDF document..."):
@@ -306,7 +266,7 @@ def process_pdf_pipeline(
             order = {'income statement': 0, 'balance sheet': 1, 'cashflow': 2}
             sorted_pages = dict(sorted(included_pages.items(), key=lambda x: order.get(x[1], 99)))
             page_nums = list(sorted_pages.keys())
-            as_dicts = get_ordered_dicts_from_pages(transformed_documents, page_nums)
+            selected_pages = get_ordered_dicts_from_pages(transformed_documents, page_nums)
         log("Statements organized.", "success")
         advance()
 
@@ -320,7 +280,7 @@ def process_pdf_pipeline(
 
             # Convert to async
             dict_results = asyncio.run(
-                run_validator_on_pages_llm(vt, as_dicts, max_concurrency=3)
+                run_validator_on_pages_llm(vt, selected_pages, max_concurrency=3)
             )
         log("Tables validated successfully.", "success")
         advance()
@@ -332,8 +292,9 @@ def process_pdf_pipeline(
             'balance_sheet': None,
             'cash_flow': None
         }
+        page_sources: Dict[str, Dict[str, Any]] = {}
 
-        for result in dict_results:
+        for idx, result in enumerate(dict_results):
             if result.data and not result.error:
                 statement_type = result.data.get('statement_type', '').lower()
                 if statement_type == 'income_statement':
@@ -342,19 +303,26 @@ def process_pdf_pipeline(
                     organized_data['balance_sheet'] = result.data
                 elif statement_type == 'cash_flow':
                     organized_data['cash_flow'] = result.data
+                if idx < len(selected_pages):
+                    page_meta = selected_pages[idx].get("metadata", {})
+                    page_sources[statement_type] = {
+                        "page_number": page_meta.get("page"),
+                        "page_label": page_meta.get("page_label"),
+                        "metadata": page_meta,
+                    }
 
         log("Financial statement data ready.", "success")
         advance()
         if progress_callback:
             progress_callback(total_steps, total_steps)
 
-        return organized_data, None
+        return organized_data, page_sources, None
 
     except Exception as e:
         log(f"Pipeline error: {e}", "error")
         if progress_callback:
             progress_callback(total_steps, total_steps)
-        return None, str(e)
+        return None, {}, str(e)
 
 def json_to_dataframe(data: Dict[str, Any]) -> Optional[pd.DataFrame]:
     """Convert JSON financial data to pandas DataFrame for display with normalized columns."""
@@ -672,14 +640,17 @@ def main():
                 st.session_state.latest_progress = percentage
                 progress_bar.progress(percentage)
 
-            # Save uploaded file temporarily
+            # Save uploaded file temporarily and store bytes for previews
+            uploaded_bytes = st.session_state.uploaded_file.getvalue()
+            st.session_state.uploaded_pdf_bytes = uploaded_bytes
+            st.session_state.page_previews = {}
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                tmp_file.write(st.session_state.uploaded_file.read())
+                tmp_file.write(uploaded_bytes)
                 tmp_path = tmp_file.name
             
             try:
                 # Run pipeline
-                organized_data, error = process_pdf_pipeline(
+                organized_data, page_sources, error = process_pdf_pipeline(
                     tmp_path,
                     llama_api_key,
                     openai_api_key,
@@ -691,6 +662,7 @@ def main():
                     st.error(f"❌ Error processing PDF: {error}")
                 else:
                     st.session_state.extracted_data = organized_data
+                    st.session_state.page_sources = page_sources
                     st.session_state.processing_complete = True
                     st.success("✅ Financial statements extracted successfully!")
             except Exception as e:
@@ -704,35 +676,6 @@ def main():
         if st.session_state.processing_complete and st.session_state.extracted_data:
             data = st.session_state.extracted_data
 
-            total_statements = sum(1 for v in data.values() if v)
-            latest_period = "—"
-            for stmt in data.values():
-                if stmt:
-                    periods = build_period_columns(stmt.get("periods"), stmt.get("rows"))
-                    if periods:
-                        latest_period = periods[-1]
-                        break
-
-            hero_html = f"""
-            <div class="hero-card">
-                <h2 style="margin-bottom:0.3rem;">Financial Data Ready</h2>
-                <p style="margin-top:0;opacity:0.85;">Latest reporting period: <strong>{latest_period}</strong> • Statements captured: <strong>{total_statements}</strong></p>
-            </div>
-            """
-            st.markdown(hero_html, unsafe_allow_html=True)
-
-            metric_cols = st.columns(3)
-            income_value = format_currency(extract_metric_value(data.get("income_statement"), ["revenue", "net sales", "total revenue"]))
-            profit_value = format_currency(extract_metric_value(data.get("income_statement"), ["net income", "profit"]))
-            cash_value = format_currency(extract_metric_value(data.get("cash_flow"), ["cash", "operating activities"]))
-
-            with metric_cols[0]:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">Revenue (latest)</div><div class="metric-value">{income_value}</div></div>', unsafe_allow_html=True)
-            with metric_cols[1]:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">Net Income (latest)</div><div class="metric-value">{profit_value}</div></div>', unsafe_allow_html=True)
-            with metric_cols[2]:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">Cash Ops (latest)</div><div class="metric-value">{cash_value}</div></div>', unsafe_allow_html=True)
-            
             # Download button
             st.markdown("---")
             col1, col2, col3 = st.columns([1, 1, 1])
@@ -751,8 +694,7 @@ def main():
             # Display Income Statement
             if data.get('income_statement'):
                 st.markdown('<div class="statement-header">💰 Income Statement</div>', unsafe_allow_html=True)
-                with st.expander("Show trend chart", expanded=True):
-                    render_statement_chart(data['income_statement'], "Income Statement Trend")
+                render_source_preview('income_statement', 'Income Statement')
                 df_income = json_to_dataframe(data['income_statement'])
                 if df_income is not None:
                     st.dataframe(
@@ -766,6 +708,7 @@ def main():
             # Display Balance Sheet
             if data.get('balance_sheet'):
                 st.markdown('<div class="statement-header">⚖️ Balance Sheet</div>', unsafe_allow_html=True)
+                render_source_preview('balance_sheet', 'Balance Sheet')
                 df_balance = json_to_dataframe(data['balance_sheet'])
                 if df_balance is not None:
                     st.dataframe(
@@ -779,6 +722,7 @@ def main():
             # Display Cash Flow Statement
             if data.get('cash_flow'):
                 st.markdown('<div class="statement-header">💸 Cash Flow Statement</div>', unsafe_allow_html=True)
+                render_source_preview('cash_flow', 'Cash Flow Statement')
                 df_cashflow = json_to_dataframe(data['cash_flow'])
                 if df_cashflow is not None:
                     st.dataframe(
@@ -799,6 +743,9 @@ def main():
                 st.session_state.processing_complete = False
                 st.session_state.extracted_data = {}
                 st.session_state.uploaded_file = None
+                st.session_state.page_sources = {}
+                st.session_state.uploaded_pdf_bytes = None
+                st.session_state.page_previews = {}
                 st.rerun()
 
 if __name__ == "__main__":

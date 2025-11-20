@@ -54,15 +54,23 @@ class attentionOutput(BaseModel):
 
 
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY environment variable is required.")
+_attention_model = None
 
-model = ChatOpenAI(model="gpt-4o", temperature=0, api_key=OPENAI_API_KEY)
+def configure_attention_llm(api_key: str | None = None):
+    """Configure the attention LLM with provided API key."""
+    global _attention_model
+    key = api_key or os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY must be provided either via argument or environment.")
+    _attention_model = ChatOpenAI(model="gpt-4o", temperature=0, api_key=key)
+
+def _get_attention_model():
+    if _attention_model is None:
+        configure_attention_llm()
+    return _attention_model
 
 def single_page_attention(page, is_not):
-
-    structured_llm = model.with_structured_output(attentionOutput)
+    structured_llm = _get_attention_model().with_structured_output(attentionOutput)
 
     if is_not :
         mdm_prompt = PromptTemplate(template = attention_prompt2, input_variables=["content"],   # for pulling comprehensive income if income statement not pressent

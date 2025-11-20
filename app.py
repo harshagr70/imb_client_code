@@ -205,7 +205,7 @@ def process_pdf_pipeline(
     try:
         configure_attention_llm(openai_api_key)
         # Step 1: Parse PDF using parser API
-        log("Parsing PDF with parser API...", "running")
+        log("Parsing PDF pages...", "running")
         with st.spinner("📄 Parsing PDF document..."):
             parser = LlamaParse(
                 api_key=llama_api_key,
@@ -556,7 +556,7 @@ def create_excel_file(data_dict: Dict[str, Any]) -> BytesIO:
 
 def main():
     # Header
-    st.markdown('<div class="main-header">📊 Financial Statement Extractor</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">📊 Accelerator 79r</div>', unsafe_allow_html=True)
     st.markdown("---")
     
     # Sidebar for API keys and upload
@@ -564,13 +564,13 @@ def main():
         st.header("⚙️ Configuration")
         
         llama_api_key = st.text_input(
-            "Parser API Key",
+            "Parser password",
             type="password",
             help="Enter the API key for your PDF parser service"
         )
         
         openai_api_key = st.text_input(
-            "Validator API Key",
+            "Validator password",
             type="password",
             help="Enter the API key for your validator service"
         )
@@ -589,7 +589,7 @@ def main():
     
     # Main content area
     if not llama_api_key or not openai_api_key:
-        st.info("👈 Please enter your API keys in the sidebar to begin.")
+        st.info("Enter password to begin")
         return
     
     if st.session_state.uploaded_file is None:

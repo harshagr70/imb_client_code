@@ -559,20 +559,61 @@ def main():
     st.markdown('<div class="main-header">📊 Accelerator 79r</div>', unsafe_allow_html=True)
     st.markdown("---")
     
+    # Helper function to get API keys (secrets first, then session state, then input)
+    def get_api_key(key_name: str, display_name: str, help_text: str) -> str:
+        """Get API key from secrets, session state, or user input."""
+        # First, try Streamlit secrets (for deployed app)
+        try:
+            if key_name in st.secrets:
+                return st.secrets[key_name]
+        except (AttributeError, KeyError):
+            pass
+        
+        # Second, check session state (for local development - persists across reruns)
+        session_key = f"{key_name}_stored"
+        if session_key in st.session_state and st.session_state[session_key]:
+            return st.session_state[session_key]
+        
+        # Third, prompt user to enter (only if not in secrets or session state)
+        entered_key = st.text_input(
+            display_name,
+            type="password",
+            help=help_text,
+            key=f"{key_name}_input"
+        )
+        
+        # Store in session state if provided
+        if entered_key:
+            st.session_state[session_key] = entered_key
+            return entered_key
+        
+        return ""
+    
     # Sidebar for API keys and upload
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        llama_api_key = st.text_input(
+        # Check if keys are in secrets (deployed app)
+        try:
+            has_secrets = "LLAMA_API_KEY" in st.secrets and "OPENAI_API_KEY" in st.secrets
+            if has_secrets:
+                st.success("✅ API keys configured (using secrets)")
+                st.caption("Keys are loaded from Streamlit secrets")
+            else:
+                st.info("💡 Enter API keys below (saved for this session)")
+        except (AttributeError, KeyError):
+            st.info("💡 Enter API keys below (saved for this session)")
+        
+        llama_api_key = get_api_key(
+            "LLAMA_API_KEY",
             "Parser password",
-            type="password",
-            help="Enter the API key for your PDF parser service"
+            "Enter the API key for your PDF parser service"
         )
         
-        openai_api_key = st.text_input(
+        openai_api_key = get_api_key(
+            "OPENAI_API_KEY",
             "Validator password",
-            type="password",
-            help="Enter the API key for your validator service"
+            "Enter the API key for your validator service"
         )
         
         st.markdown("---")
@@ -589,7 +630,7 @@ def main():
     
     # Main content area
     if not llama_api_key or not openai_api_key:
-        st.info("Enter password to begin")
+        st.info("👈 Please enter API keys in the sidebar to begin")
         return
     
     if st.session_state.uploaded_file is None:

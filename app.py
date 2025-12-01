@@ -735,44 +735,53 @@ def main():
             # Display Income Statement
             if data.get('income_statement'):
                 st.markdown('<div class="statement-header">💰 Income Statement</div>', unsafe_allow_html=True)
-                render_source_preview('income_statement', 'Income Statement')
-                df_income = json_to_dataframe(data['income_statement'])
-                if df_income is not None:
-                    st.dataframe(
-                        df_income,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                else:
-                    st.warning("Income statement data is not in the expected format.")
+                col_preview, col_table = st.columns([1, 2])
+                with col_preview:
+                    render_source_preview('income_statement', 'Income Statement')
+                with col_table:
+                    df_income = json_to_dataframe(data['income_statement'])
+                    if df_income is not None:
+                        st.dataframe(
+                            df_income,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.warning("Income statement data is not in the expected format.")
             
             # Display Balance Sheet
             if data.get('balance_sheet'):
                 st.markdown('<div class="statement-header">⚖️ Balance Sheet</div>', unsafe_allow_html=True)
-                render_source_preview('balance_sheet', 'Balance Sheet')
-                df_balance = json_to_dataframe(data['balance_sheet'])
-                if df_balance is not None:
-                    st.dataframe(
-                        df_balance,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                else:
-                    st.warning("Balance sheet data is not in the expected format.")
+                col_preview, col_table = st.columns([1, 2])
+                with col_preview:
+                    render_source_preview('balance_sheet', 'Balance Sheet')
+                with col_table:
+                    df_balance = json_to_dataframe(data['balance_sheet'])
+                    if df_balance is not None:
+                        st.dataframe(
+                            df_balance,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.warning("Balance sheet data is not in the expected format.")
             
             # Display Cash Flow Statement
             if data.get('cash_flow'):
                 st.markdown('<div class="statement-header">💸 Cash Flow Statement</div>', unsafe_allow_html=True)
-                render_source_preview('cash_flow', 'Cash Flow Statement')
-                df_cashflow = json_to_dataframe(data['cash_flow'])
-                if df_cashflow is not None:
-                    st.dataframe(
-                        df_cashflow,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                else:
-                    st.warning("Cash flow statement data is not in the expected format.")
+                col_preview, col_table = st.columns([1, 2])
+                with col_preview:
+                    render_source_preview('cash_flow', 'Cash Flow Statement')
+                with col_table:
+                    df_cashflow = json_to_dataframe(data['cash_flow'])
+                    if df_cashflow is not None:
+                        st.dataframe(
+                            df_cashflow,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.warning("Cash flow statement data is not in the expected format.")
             
             # Show message if no data found
             if not any([data.get('income_statement'), data.get('balance_sheet'), data.get('cash_flow')]):

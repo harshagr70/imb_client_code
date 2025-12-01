@@ -153,7 +153,7 @@ Convert messy financial tables into STRICT JSON that matches the schema below.
 
 6. **Enhanced Duplicate Detection**
    - Maintain set of `normalized_labels` for current statement
-   - Normalize: `label.lower().strip().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ')`
+   - Normalize: `label.lower().strip().replace(/[^\\w\\s]/g, '').replace(/\\s+/g, ' ')`
    - Before adding row: check if normalized label exists
    - Skip duplicates EXCEPT:
      * Section headers (`is_section = True`) - always allow
